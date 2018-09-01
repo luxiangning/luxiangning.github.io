@@ -47,21 +47,6 @@ layout: default
     </div>
 </header>
 
-<div id="container"></div>
-<link rel="stylesheet" href="https://luxiangning.github.io/gitment/style/default.css">
-<script src="https://luxiangning.github.io/gitment/dist/gitment.browser.js"></script>
-<script>
-var gitment = new Gitment({
-  id: '页面 ID', // 可选。默认为 location.href
-  owner: 'luxiangning',
-  repo: 'https://luxiangning.github.io/_comment',
-  oauth: {
-    client_id: 'f3a368523507920523da',
-    client_secret: '72b4f2e2a8bed50bf73a8b226c2ac3df44f6f0ac',
-  },
-})
-gitment.render('container')
-</script>
 
 <!-- Post Content -->
 <article>
@@ -98,10 +83,27 @@ gitment.render('container')
                 </ul>
 
 
+                <!-- 加入gitment评论 -->
+                <div id="container"></div>
+                <link rel="stylesheet" href="https://luxiangning.github.io/gitment/style/default.css">
+                <script src="https://luxiangning.github.io/gitment/dist/gitment.browser.js"></script>
+                <script>
+                var gitment = new Gitment({
+                  id: '页面 ID', // 可选。默认为 location.href
+                  owner: 'luxiangning',
+                  repo: 'https://luxiangning.github.io/_comment',
+                  oauth: {
+                    client_id: 'f3a368523507920523da',
+                    client_secret: '72b4f2e2a8bed50bf73a8b226c2ac3df44f6f0ac',
+                  },
+                })
+                gitment.render('container')
+                </script>
+
                 <!--Gitalk评论start  -->
                 {% if site.gitalk.enable %}
                 <!-- 引入Gitalk评论插件  -->
-                <link rel="stylesheet" href="https://unpkg.com/gitalk/dist/gitalk.css">
+<!--                 <link rel="stylesheet" href="https://unpkg.com/gitalk/dist/gitalk.css">
                 <script src="https://unpkg.com/gitalk@latest/dist/gitalk.min.js"></script>
                 <div id="gitalk-container"></div>
                 <script type="text/javascript">
@@ -115,7 +117,7 @@ gitment.render('container')
                     id: window.location.pathname,
                     });
                     gitalk.render('gitalk-container');
-                </script>
+                </script> -->
                 {% endif %}
                 <!-- Gitalk end -->
 
