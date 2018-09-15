@@ -1,7 +1,7 @@
 ---
 layout:     post
-title:      hive
-subtitle:   hive源码学习之-hive环境搭建
+title:      hive编译过程
+subtitle:   hive源码学习之-hql到ast
 date:       2018-09-08
 author:     鲁湘宁
 header-img: img/doc1-bg-alone.jpg
@@ -86,18 +86,13 @@ foreach(vars as var) {
 session对象会存储当前会话的相关配置，包括hive从配置文件读取的信息、通过命令行设置的状态信息，还有当前查询执行的状态信息等。
 
 然后会对sql进行预处理，包括移除注释信息和进行分词，当前的分词逻辑是使用空白字符分词（如select * from employee会被分解为[select, *, from, employee]）  
-![](https://luxiangning.github.io/img/hive/hive-cli_02.png)
-
+![](https://luxiangning.github.io/img/hive/hive-cli_02.png)  
 
 基于分词后的tokens判断当前的执行类型并执行。当前包括
-
-1、quit、exit
-
-2、source (重新加载配置信息)
-
-3、！cmd ，即shell指令
-
-4、local mode,即sql本地执行方案。
+1、quit、exit  
+2、source (重新加载配置信息)  
+3、！cmd ，即shell指令  
+4、local mode,即sql本地执行方案。  
 
 
 
@@ -106,65 +101,38 @@ CommandProcessorFactory.get(tokens, (HiveConf) conf)->
 getForHiveCommand->
 getForHiveCommandInternal->
 HiveCommand.find(cmd, testOnly)
-select 执行后的结果为null
-
-这时候会执行DriverFactory.newDriver(conf)，
-
-getNewQueryState生成一个QueryState, 会创建一个QueryId来标志该查询。
-
+select 执行后的结果为null  
+这时候会执行DriverFactory.newDriver(conf)，  
+getNewQueryState生成一个QueryState, 会创建一个QueryId来标志该查询。    
 然后执行  
 ![](https://luxiangning.github.io/img/hive/hive-cli_03.png)  
 
-
-即基于当前的queryState生成一个Driver实例。
-
-当前设定的一些策略会影响后面的执行，
-
+即基于当前的queryState生成一个Driver实例。  
+当前设定的一些策略会影响后面的执行，  
 ![](https://luxiangning.github.io/img/hive/hive-cli_04.png)  
-
-至此，得到一个真正执行的Driver，即proc。
-
-
-
-执行 processLocalCmd
-
-这里进入到最重要的流程 
-![](https://luxiangning.github.io/img/hive/hive-cli_05.png)  
- →
-
-coreDriver.compileAndRespond(statement)->
-compileAndRespond(command, false)->
-compileInternal(command, false) ->
-compile(command, true, deferClose)
+至此，得到一个真正执行的Driver，即proc。  
+执行 processLocalCmd  
+这里进入到最重要的流程   
+![](https://luxiangning.github.io/img/hive/hive-cli_05.png)→  
+coreDriver.compileAndRespond(statement)->  
+compileAndRespond(command, false)->  
+compileInternal(command, false) ->  
+compile(command, true, deferClose)  
 compile过程中会先把相关的变量替换掉。
-
-queryStr = HookUtils.redactLogString(conf, command)
-![](https://luxiangning.github.io/img/hive/hive-cli_06.png)   
-
-然后会设置transaction manager等不同的上下文信息。
-
-然后是抽象逻辑树的生成。
-
-![](https://luxiangning.github.io/img/hive/hive-cli_07.png)  
-
-然后使用ANTLR进行词法分析。
-
-![](https://luxiangning.github.io/img/hive/hive-cli_08.png)  
-
-生成tokens如下：
-
-![](https://luxiangning.github.io/img/hive/hive-cli_09.png)  
-
-然后执行 
-
-HiveParser parser = new HiveParser(tokens)
-
-执行解析
-
-r = parser.生成的Tree为
-
+queryStr = HookUtils.redactLogString(conf, command)  
+![](https://luxiangning.github.io/img/hive/hive-cli_06.png)     
+然后会设置transaction manager等不同的上下文信息。  
+然后是抽象逻辑树的生成。  
+![](https://luxiangning.github.io/img/hive/hive-cli_07.png)    
+然后使用ANTLR进行词法分析。  
+![](https://luxiangning.github.io/img/hive/hive-cli_08.png)   
+生成tokens如下：  
+![](https://luxiangning.github.io/img/hive/hive-cli_09.png)   
+然后执行   
+HiveParser parser = new HiveParser(tokens)  
+执行解析  
+r = parser.生成的Tree为  
 (tok_query (tok_from (tok_tabref (tok_tabname employee))) (tok_insert (tok_destination (tok_dir tok_tmp_file)) (tok_select (tok_selexpr tok_allcolref)))) <eof>
-
 
 
 nil
@@ -195,17 +163,12 @@ nil
 
     <EOF>
 
-支持抽象逻辑树已经生成完毕。
-
-然后是语义分析和执行计划生成
-
-BaseSemanticAnalyzer sem = SemanticAnalyzerFactory.get(queryState, tree)
-
-analyzeInternal(ASTNode ast, PlannerContextFactory pcf)开始进行语义分析->
-genResolvedParseTree→
-
-(SemanticAnalyzer.java) doPhase1→
-
+支持抽象逻辑树已经生成完毕。  
+然后是语义分析和执行计划生成  
+BaseSemanticAnalyzer sem = SemanticAnalyzerFactory.get(queryState, tree)    
+analyzeInternal(ASTNode ast, PlannerContextFactory pcf)开始进行语义分析->  
+genResolvedParseTree->  
+(SemanticAnalyzer.java) **doPhase1**->
 [processTable,processSubQuery,processJoin]  
 
 
