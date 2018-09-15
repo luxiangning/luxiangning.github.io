@@ -84,11 +84,11 @@ foreach(vars as var) {
 ![](https://luxiangning.github.io/img/hive/hive-cli_01.png)  
 
 session对象会存储当前会话的相关配置，包括hive从配置文件读取的信息、通过命令行设置的状态信息，还有当前查询执行的状态信息等。
-
 然后会对sql进行预处理，包括移除注释信息和进行分词，当前的分词逻辑是使用空白字符分词（如select * from employee会被分解为[select, *, from, employee]）  
-![](https://luxiangning.github.io/img/hive/hive-cli_02.png)  
+![](https://luxiangning.github.io/img/hive/hive-cli_02.png)
 
-基于分词后的tokens判断当前的执行类型并执行。当前包括
+
+基于分词后的tokens判断当前的执行类型并执行。当前包括  
 1、quit、exit  
 2、source (重新加载配置信息)  
 3、！cmd ，即shell指令  
