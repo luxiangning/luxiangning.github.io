@@ -1,126 +1,397 @@
 ---
 layout:     post
-title:      hive
-subtitle:   hive源码学习之-hive环境搭建
-date:       2018-09-01
+title:      hive编译过程
+subtitle:   hive源码学习之-ast到queryblock
+date:       2018-09-08
 author:     鲁湘宁
 header-img: img/doc1-bg-alone.jpg
 catalog: true
 tags:
-    - hive 入门 环境 环境搭建 3.1.0 源码 学习 远程调试 调试 intellij idea
+    - hive 入门 3.1.0 源码 hql解析 hql ast queryblock
 ---
 ## 前言
+AST Tree仍然非常复杂，不够结构化，不方便直接翻译为MapReduce程序，AST Tree转化为QueryBlock就是将SQL进一部抽象和结构化。  
+QueryBlock是一条SQL最基本的组成单元，包括三个部分：输入源，计算过程，输出。简单来讲一个QueryBlock就是一个子查询。  
 
-在数据生产过程中最多接触的就是hive,学习源码可以帮助自己更好的理解HSQL的执行流程和优化策略。本文基于自己学习hive源码的过程为想要学习hive源码的人提供一些学习的思路，提高学习源码的效率，也避免大家学习过程中踩坑，
+## 生成QueryBlock
 
-## 环境
-* 系统: 远端服务器使用的是linux (作者用到的是debian 8), 本地使用的是mac
-* hive版本: 3.1.0
-	hive 官网 http://hive.apache.org/downloads.html
-* hadoop版本: 3.1.1
- 	hadoop 官网 http://hadoop.apache.org/#Download+Hadoop
-* 远程调试工具intellij idea
-	intellij idea官网下载地址: https://www.jetbrains.com/idea/download/#section=mac
+### 总体流程
+ast是一个描述sql对应的结构的描述体。ast更多的是反映了该sql对应了哪些流程结构，而实际上一个结构及其子结构才对应一个具体的查询流程，而且ast对于一个查询的具体元数据信息是缺失的。在生成map-reduce之前，需要一个描述具体map-reduce信息的结构体，即QueryBlock。  
+一个map-reduce流程的主要组成是输入、计算过程和输出，所以QueryBlock也就相应的对这三方面的信息进行了描述。
 
-## 安装流程
+### 生成过程
+QueryBlock的生成是一个递归调用的过程。每一个ast中的QUERY\_TOK对应一个QueryBlock。对于一个QueryBlock中的描述信息，会通过doPhase1进行递归调用来进行生成，也会在后续查询meta信息把元数据信息补充进去。  
+一个qb结构如下   
+![](https://luxiangning.github.io/img/hive/hive-qb_01.png)  
+具体各个字段的含义为:  
+numJoins: join的个数，3.1.0没有使用  
+numGbys: groupby的个数，3.1.0没有使用  
+numSels: select的个数，3.1.0没有使用  
+numSelDi: select distinct的个数，3.1.0没有使用  
+aliasToTabs: 记录了当前的查询中别名与表的关系，如select * from report r,则aliasToTabs会存储 r->report映射关系。因为在进行相关join等操作时，很多都是用别名进行的操作，所以这里别名作为key也是应有之义。   
+aliasToSubq: 记录了子查询别名与子查询的对应关心。  
+例子如图所示  
+![](https://luxiangning.github.io/img/hive/hive-qb_02.png) 
+aliases: 上述两者的合集  
+qbp: 当前qb的parse信息,如下图所示    
+![](https://luxiangning.github.io/img/hive/hive-qb_04.jpg)  
+可以看到，qbp中记录了一个QUERY_TOK下对应的所有的相关的子TOK信息。  
+qbm: 当前qb的元数据信息，包括分区信息、文件信息等  
 
-1. 知识准备
-	* hive是基于Hadoop的一个数据仓库工具，可以将结构化的数据文件映射为一张数据库表，并提供简单的sql查询功能，可以将sql语句转换为MapReduce任务进行运行。
-	hive系统的搭建需要依赖于hadoop系统的搭建。
-	* Hadoop的框架最核心的设计就是：HDFS和MapReduce。HDFS为海量的数据提供了存储，则MapReduce为海量的数据提供了计算。hadoop存储和计算流程对于hive用户是透明的。
-    * hive有debug模式，在调试的时候需要启动debug模式
-    * intellij idea支持远程调试，只需要设定远程调试ip和port即可实现远程调试。
-2. hadoop安装
-    * 下载hadoop（使用官网编译好的二进制包安装,源码包需要自己进行编译，这里不再介绍）  
-    	进入hadoop官网(http://hadoop.apache.org)，点击  
-    	![](https://luxiangning.github.io/img/hive/hadoop-download_1.jpg)   
-    	然后点击  
-    	![](https://luxiangning.github.io/img/hive/hadoop-download_2.jpg)   
-    	跳转到下载界面。
-    	如图显示，点击下载已经编译好的二级制包。  
-    	![](https://luxiangning.github.io/img/hive/hadoop-download_3.jpg)   
-    	然后选择某个镜像下载即可。  
-    	![](https://luxiangning.github.io/img/hive/hadoop-download_4.jpg)   
+展开整个qb如下图所示：  
+![](https://luxiangning.github.io/img/hive/hive-qb_03.jpg) 
 
-    	命令行模式下使用wget上述地址下载。 wget http://mirror.bit.edu.cn/apache/hadoop/common/hadoop-3.1.1/hadoop-3.1.1.tar.gz。
-    * 安装hadoop  
-    	命令行模式下切换到下载文件的地址，执行  
-	   tar -zxvf hadoop-3.3.1.tar.gz 解压当前文件。  
-    	进入到解压后的目录,然后添加环境变量:  
-    	&nbsp;&nbsp; 切换到解压后的文件夹,pwd 查看当前目录。  
-    	&nbsp;&nbsp; vim ~/.bash_profile  
-    	&nbsp;&nbsp; 添加如下内容  
-    	&nbsp;&nbsp; export HADOOP_HOME=/home/yourname/hadoop-3.3.1  
-    	&nbsp;&nbsp; export PATH=$PATH:$HADOOP_HOME/bin #添加该内容后可以直接hadoop即可。  
-    	&nbsp;&nbsp; source ~/.bash_profile  
-    	至此,hadoop安装完成。  
-    * 验证一下  
-       执行 **hadoop dfs -ls /** 查看结果,正常输出则代表安装无问题。
-3. hive的安装
-	* 下载hive  
-	hive下载官网http://hive.apache.org/downloads.html  
-	具体的下载和解压过程与hadoop类似，这里不再详细介绍。笔者本人下载的是3.1.0
-	* 安装hive  
-	解压文件后编辑 **~/.bash_profile**设置环境变量  
-	export HIVE_HOME=/home/youname/hive-3.1.0 (这里认为你的解压文件夹为/home/youname/hive-3.1.0)  
-	export HIVE\_CONF\_DIR=$HIVE\_HOME/conf   
-	export PATH=$PATH:$HIVE\_HOME/bin  
-	cd /home/youname/hive-3.1.0,你会看到bin文件夹和conf文件夹。bin里面是hive执行文件，conf文件夹是配置文件。  
-	我们主要的需要配置conf内容：  
-	&nbsp;&nbsp; metadata存储配置，连接配置  
-	&nbsp;&nbsp; metadata初始化  
-	&nbsp;&nbsp; log配置  
-	* 配置流程:  
-	hive-env.sh(cp hive-env.sh.template hive-env.sh即可),主要配置hadoop依赖路径信息,笔者配置如下:  
-	&nbsp;&nbsp;&nbsp;export JAVA_HOME=/opt/luxiangning/jdk/jdk1.8  #java路径  
-   &nbsp;&nbsp;&nbsp;export HADOOP\_HOME=/home/luxiangning/hadoop-3.1.1 #hadoop安装路径  
-   &nbsp;&nbsp;&nbsp;export HIVE\_CONF\_DIR=/home/luxiangning/hive-3.1.0-bin/conf #配置文件路径  
-   &nbsp;&nbsp;&nbsp;export HIVE_AUX_JARS_PATH=/home/luxiangning/hive-3.1.0/lib#依赖jar包路径    
-   hive-site.xml(cp hive-default.xml.template hive-site.xml)，主要配置hive运行时的一些依赖jar包、metadata相关数据库的连接信息等。  
-   本环境使用的是mysql 5.6作为元数据存储环境，所以需要先装mysql，这里就不再赘述。
-   这里配置时需要下载文件mysql-connector-java-5.1.47.tar.gz  
-   ![](https://luxiangning.github.io/img/hive/mysql-config.jpg)  
-   ![]https://dev.mysql.com/downloads/connector/j/  
-   解压后放到/home/luxiangning/hive-3.1.0/lib中。  
-   mysql中为hive新建一个用户：**grant all privileges on . to 'hive' @ '%' identified by 'yourpassword'**,这里密码自己设定。    
-   然后,配置如下的信息   
-   ![](https://luxiangning.github.io/img/hive/hive-site.jpg)  
-    **hive.metastore.warehouse.dir** :  
-    /home/luxianging/hive-3.1.0/warehouse  
-    **hive.querylog.location** :  
-    /home/luxianging/hive-3.1.0/log  
-    **javax.jdo.option.ConnectionURL** :  
-    dbc:mysql://localhost:3306/hive?createDatabaseIfNotExist=true&amp;characterEncoding=UTF-8&amp;useSSL=false  
-    **javax.jdo.option.ConnectionDriverName** :  
-    com.mysql.jdbc.Driver  
-    **javax.jdo.option.ConnectionUserName**:  
-    hive  
-    **javax.jdo.option.ConnectionPassword** :  
-    yourpassword    
-   完成该配置后，在进入hive目录下的bin目录，运行命令：./schematool -initSchema -dbType mysql,完成metadata数据库的初始化。   
-   然后执行hive命令即可查看是否安装成功。
+主要的函数过程如下图所示  
+```java  
+public boolean doPhase1(ASTNode ast, QB qb, Phase1Ctx ctx_1, PlannerContext plannerCtx)
+      throws SemanticException {
 
-## 远程调试
-1. 下载并安装intellij idea，下载地址(笔者使用的是mac)  
-    https://www.jetbrains.com/idea/download/#section=mac
-2. 下载上一个过程3中的源码，并使用maven项目的方式打开。
-3. 如下图所示，点击Edit Configurations  
-   ![](https://luxiangning.github.io/img/hive/remote-debug_1.jpg)  
-   点击添加  
-   ![](https://luxiangning.github.io/img/hive/remote-debug_2.jpg)  
-   选择Remote  
-   ![](https://luxiangning.github.io/img/hive/remote-debug_3.jpg)  
-   填写host和port即可。
-   ![](https://luxiangning.github.io/img/hive/remote-debug_4.jpg)   
-4. 在本地服务代码中打断点。具体代码入口将在后续介绍，这里现在下图所示位置打断点。  
-    ![](https://luxiangning.github.io/img/hive/remote-debug_5.jpg)  
-5. 返回登录到远端服务器，切换到/home/youname/hive-3.1.0/bin,执行./hive --debug  
-	命令行会显示 **Listening for transport dt_socket at address: 8000**  
-	在intellij idea 选择刚才的配置项（hive）,再点击debug按钮  
-	![](https://luxiangning.github.io/img/hive/remote-debug_6.jpg)  
-	则会出现如下提示  
-	**Connected to the target VM, address: '10.8.120.184:8000', transport: 'socket'**  
-	返回登录到远端服务器，输入sql指令，如show databases;则intellij idea会在断点处暂停，实现远程调试。  
-	![](https://luxiangning.github.io/img/hive/remote-debug_7.jpg)  
+    boolean phase1Result = true;
+    // 对于每一个QueryBlock,qbp记录了该block对应的相应解析信息
+    QBParseInfo qbp = qb.getParseInfo();
+    // 跳过递归
+    boolean skipRecursion = false;
+
+    if (ast.getToken() != null) {
+      skipRecursion = true;
+      switch (ast.getToken().getType()) {
+      case HiveParser.TOK_SELECTDI:
+        qb.countSelDi();
+        // fall through
+      case HiveParser.TOK_SELECT:
+        qb.countSel();
+        qbp.setSelExprForClause(ctx_1.dest, ast);
+
+        int posn = 0;
+        if (((ASTNode) ast.getChild(0)).getToken().getType() == HiveParser.QUERY_HINT) {
+          ParseDriver pd = new ParseDriver();
+          String queryHintStr = ast.getChild(0).getText();
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("QUERY HINT: "+queryHintStr);
+          }
+          try {
+            ASTNode hintNode = pd.parseHint(queryHintStr);
+            qbp.setHints(hintNode);
+            posn++;
+          } catch (ParseException e) {
+            throw new SemanticException("failed to parse query hint: "+e.getMessage(), e);
+          }
+        }
+
+        if ((ast.getChild(posn).getChild(0).getType() == HiveParser.TOK_TRANSFORM)) {
+          queryProperties.setUsesScript(true);
+        }
+
+        LinkedHashMap<String, ASTNode> aggregations = doPhase1GetAggregationsFromSelect(ast,
+            qb, ctx_1.dest);
+        doPhase1GetColumnAliasesFromSelect(ast, qbp, ctx_1.dest);
+        qbp.setAggregationExprsForClause(ctx_1.dest, aggregations);
+        qbp.setDistinctFuncExprsForClause(ctx_1.dest,
+            doPhase1GetDistinctFuncExprs(aggregations));
+        break;
+
+      case HiveParser.TOK_WHERE:
+        qbp.setWhrExprForClause(ctx_1.dest, ast);
+        if (!SubQueryUtils.findSubQueries((ASTNode) ast.getChild(0)).isEmpty()) {
+          queryProperties.setFilterWithSubQuery(true);
+        }
+        break;
+
+      case HiveParser.TOK_INSERT_INTO:
+        String currentDatabase = SessionState.get().getCurrentDatabase();
+        String tab_name = getUnescapedName((ASTNode) ast.getChild(0).getChild(0), currentDatabase);
+        qbp.addInsertIntoTable(tab_name, ast);
+
+      case HiveParser.TOK_DESTINATION:
+        ctx_1.dest = this.ctx.getDestNamePrefix(ast, qb).toString() + ctx_1.nextNum;
+        ctx_1.nextNum++;
+        boolean isTmpFileDest = false;
+        if (ast.getChildCount() > 0 && ast.getChild(0) instanceof ASTNode) {
+          ASTNode ch = (ASTNode) ast.getChild(0);
+          if (ch.getToken().getType() == HiveParser.TOK_DIR && ch.getChildCount() > 0
+              && ch.getChild(0) instanceof ASTNode) {
+            ch = (ASTNode) ch.getChild(0);
+            isTmpFileDest = ch.getToken().getType() == HiveParser.TOK_TMP_FILE;
+          } else {
+            if (ast.getToken().getType() == HiveParser.TOK_DESTINATION
+                && ast.getChild(0).getType() == HiveParser.TOK_TAB) {
+              String fullTableName = getUnescapedName((ASTNode) ast.getChild(0).getChild(0),
+                  SessionState.get().getCurrentDatabase());
+              qbp.getInsertOverwriteTables().put(fullTableName.toLowerCase(), ast);
+              qbp.setDestToOpType(ctx_1.dest, true);
+            }
+          }
+        }
+
+        // is there a insert in the subquery
+        if (qbp.getIsSubQ() && !isTmpFileDest) {
+          throw new SemanticException(ErrorMsg.NO_INSERT_INSUBQUERY.getMsg(ast));
+        }
+
+        qbp.setDestForClause(ctx_1.dest, (ASTNode) ast.getChild(0));
+        handleInsertStatementSpecPhase1(ast, qbp, ctx_1);
+
+        if (qbp.getClauseNamesForDest().size() == 2) {
+          // From the moment that we have two destination clauses,
+          // we know that this is a multi-insert query.
+          // Thus, set property to right value.
+          // Using qbp.getClauseNamesForDest().size() >= 2 would be
+          // equivalent, but we use == to avoid setting the property
+          // multiple times
+          queryProperties.setMultiDestQuery(true);
+        }
+
+        if (plannerCtx != null && !queryProperties.hasMultiDestQuery()) {
+          plannerCtx.setInsertToken(ast, isTmpFileDest);
+        } else if (plannerCtx != null && qbp.getClauseNamesForDest().size() == 2) {
+          // For multi-insert query, currently we only optimize the FROM clause.
+          // Hence, introduce multi-insert token on top of it.
+          // However, first we need to reset existing token (insert).
+          // Using qbp.getClauseNamesForDest().size() >= 2 would be
+          // equivalent, but we use == to avoid setting the property
+          // multiple times
+          plannerCtx.resetToken();
+          plannerCtx.setMultiInsertToken((ASTNode) qbp.getQueryFrom().getChild(0));
+        }
+        break;
+
+      case HiveParser.TOK_FROM:
+        int child_count = ast.getChildCount();
+        if (child_count != 1) {
+          throw new SemanticException(generateErrorMessage(ast,
+              "Multiple Children " + child_count));
+        }
+
+        if (!qbp.getIsSubQ()) {
+          qbp.setQueryFromExpr(ast);
+        }
+
+        // Check if this is a subquery / lateral view
+        ASTNode frm = (ASTNode) ast.getChild(0);
+        if (frm.getToken().getType() == HiveParser.TOK_TABREF) {
+          processTable(qb, frm);
+        } else if (frm.getToken().getType() == HiveParser.TOK_SUBQUERY) {
+          processSubQuery(qb, frm);
+        } else if (frm.getToken().getType() == HiveParser.TOK_LATERAL_VIEW ||
+            frm.getToken().getType() == HiveParser.TOK_LATERAL_VIEW_OUTER) {
+          queryProperties.setHasLateralViews(true);
+          processLateralView(qb, frm);
+        } else if (isJoinToken(frm)) {
+          processJoin(qb, frm);
+          qbp.setJoinExpr(frm);
+        }else if(frm.getToken().getType() == HiveParser.TOK_PTBLFUNCTION){
+          queryProperties.setHasPTF(true);
+          processPTF(qb, frm);
+        }
+        break;
+
+      case HiveParser.TOK_CLUSTERBY:
+        // Get the clusterby aliases - these are aliased to the entries in the
+        // select list
+        queryProperties.setHasClusterBy(true);
+        qbp.setClusterByExprForClause(ctx_1.dest, ast);
+        break;
+
+      case HiveParser.TOK_DISTRIBUTEBY:
+        // Get the distribute by aliases - these are aliased to the entries in
+        // the
+        // select list
+        queryProperties.setHasDistributeBy(true);
+        qbp.setDistributeByExprForClause(ctx_1.dest, ast);
+        if (qbp.getClusterByForClause(ctx_1.dest) != null) {
+          throw new SemanticException(generateErrorMessage(ast,
+              ErrorMsg.CLUSTERBY_DISTRIBUTEBY_CONFLICT.getMsg()));
+        } else if (qbp.getOrderByForClause(ctx_1.dest) != null) {
+          throw new SemanticException(generateErrorMessage(ast,
+              ErrorMsg.ORDERBY_DISTRIBUTEBY_CONFLICT.getMsg()));
+        }
+        break;
+
+      case HiveParser.TOK_SORTBY:
+        // Get the sort by aliases - these are aliased to the entries in the
+        // select list
+        queryProperties.setHasSortBy(true);
+        qbp.setSortByExprForClause(ctx_1.dest, ast);
+        if (qbp.getClusterByForClause(ctx_1.dest) != null) {
+          throw new SemanticException(generateErrorMessage(ast,
+              ErrorMsg.CLUSTERBY_SORTBY_CONFLICT.getMsg()));
+        } else if (qbp.getOrderByForClause(ctx_1.dest) != null) {
+          throw new SemanticException(generateErrorMessage(ast,
+              ErrorMsg.ORDERBY_SORTBY_CONFLICT.getMsg()));
+        }
+
+        break;
+
+      case HiveParser.TOK_ORDERBY:
+        // Get the order by aliases - these are aliased to the entries in the
+        // select list
+        queryProperties.setHasOrderBy(true);
+        qbp.setOrderByExprForClause(ctx_1.dest, ast);
+        if (qbp.getClusterByForClause(ctx_1.dest) != null) {
+          throw new SemanticException(generateErrorMessage(ast,
+              ErrorMsg.CLUSTERBY_ORDERBY_CONFLICT.getMsg()));
+        }
+        // If there are aggregations in order by, we need to remember them in qb.
+        qbp.addAggregationExprsForClause(ctx_1.dest,
+            doPhase1GetAggregationsFromSelect(ast, qb, ctx_1.dest));
+        break;
+
+      case HiveParser.TOK_GROUPBY:
+      case HiveParser.TOK_ROLLUP_GROUPBY:
+      case HiveParser.TOK_CUBE_GROUPBY:
+      case HiveParser.TOK_GROUPING_SETS:
+        // Get the groupby aliases - these are aliased to the entries in the
+        // select list
+        queryProperties.setHasGroupBy(true);
+        if (qbp.getJoinExpr() != null) {
+          queryProperties.setHasJoinFollowedByGroupBy(true);
+        }
+        if (qbp.getSelForClause(ctx_1.dest).getToken().getType() == HiveParser.TOK_SELECTDI) {
+          throw new SemanticException(generateErrorMessage(ast,
+              ErrorMsg.SELECT_DISTINCT_WITH_GROUPBY.getMsg()));
+        }
+        qbp.setGroupByExprForClause(ctx_1.dest, ast);
+        skipRecursion = true;
+
+        // Rollup and Cubes are syntactic sugar on top of grouping sets
+        if (ast.getToken().getType() == HiveParser.TOK_ROLLUP_GROUPBY) {
+          qbp.getDestRollups().add(ctx_1.dest);
+        } else if (ast.getToken().getType() == HiveParser.TOK_CUBE_GROUPBY) {
+          qbp.getDestCubes().add(ctx_1.dest);
+        } else if (ast.getToken().getType() == HiveParser.TOK_GROUPING_SETS) {
+          qbp.getDestGroupingSets().add(ctx_1.dest);
+        }
+        break;
+
+      case HiveParser.TOK_HAVING:
+        qbp.setHavingExprForClause(ctx_1.dest, ast);
+        qbp.addAggregationExprsForClause(ctx_1.dest,
+            doPhase1GetAggregationsFromSelect(ast, qb, ctx_1.dest));
+        break;
+
+      case HiveParser.KW_WINDOW:
+        if (!qb.hasWindowingSpec(ctx_1.dest) ) {
+          throw new SemanticException(generateErrorMessage(ast,
+              "Query has no Cluster/Distribute By; but has a Window definition"));
+        }
+        handleQueryWindowClauses(qb, ctx_1, ast);
+        break;
+
+      case HiveParser.TOK_LIMIT:
+        if (ast.getChildCount() == 2) {
+          qbp.setDestLimit(ctx_1.dest,
+              new Integer(ast.getChild(0).getText()),
+              new Integer(ast.getChild(1).getText()));
+        } else {
+          qbp.setDestLimit(ctx_1.dest, new Integer(0),
+              new Integer(ast.getChild(0).getText()));
+        }
+        break;
+
+      case HiveParser.TOK_ANALYZE:
+        // Case of analyze command
+
+        String table_name = getUnescapedName((ASTNode) ast.getChild(0).getChild(0)).toLowerCase();
 
 
+        qb.setTabAlias(table_name, table_name);
+        qb.addAlias(table_name);
+        qb.getParseInfo().setIsAnalyzeCommand(true);
+        qb.getParseInfo().setNoScanAnalyzeCommand(this.noscan);
+        // Allow analyze the whole table and dynamic partitions
+        HiveConf.setVar(conf, HiveConf.ConfVars.DYNAMICPARTITIONINGMODE, "nonstrict");
+        HiveConf.setVar(conf, HiveConf.ConfVars.HIVEMAPREDMODE, "nonstrict");
+
+        break;
+
+      case HiveParser.TOK_UNIONALL:
+        if (!qbp.getIsSubQ()) {
+          // this shouldn't happen. The parser should have converted the union to be
+          // contained in a subquery. Just in case, we keep the error as a fallback.
+          throw new SemanticException(generateErrorMessage(ast,
+              ErrorMsg.UNION_NOTIN_SUBQ.getMsg()));
+        }
+        skipRecursion = false;
+        break;
+
+      case HiveParser.TOK_INSERT:
+        ASTNode destination = (ASTNode) ast.getChild(0);
+        Tree tab = destination.getChild(0);
+
+        // Proceed if AST contains partition & If Not Exists
+        if (destination.getChildCount() == 2 &&
+            tab.getChildCount() == 2 &&
+            destination.getChild(1).getType() == HiveParser.TOK_IFNOTEXISTS) {
+          String tableName = tab.getChild(0).getChild(0).getText();
+
+          Tree partitions = tab.getChild(1);
+          int childCount = partitions.getChildCount();
+          HashMap<String, String> partition = new HashMap<String, String>();
+          for (int i = 0; i < childCount; i++) {
+            String partitionName = partitions.getChild(i).getChild(0).getText();
+            // Convert to lowercase for the comparison
+            partitionName = partitionName.toLowerCase();
+            Tree pvalue = partitions.getChild(i).getChild(1);
+            if (pvalue == null) {
+              break;
+            }
+            String partitionVal = stripQuotes(pvalue.getText());
+            partition.put(partitionName, partitionVal);
+          }
+          // if it is a dynamic partition throw the exception
+          if (childCount != partition.size()) {
+            throw new SemanticException(ErrorMsg.INSERT_INTO_DYNAMICPARTITION_IFNOTEXISTS
+                .getMsg(partition.toString()));
+          }
+          Table table = null;
+          try {
+            table = this.getTableObjectByName(tableName);
+          } catch (HiveException ex) {
+            throw new SemanticException(ex);
+          }
+          try {
+            Partition parMetaData = db.getPartition(table, partition, false);
+            // Check partition exists if it exists skip the overwrite
+            if (parMetaData != null) {
+              phase1Result = false;
+              skipRecursion = true;
+              LOG.info("Partition already exists so insert into overwrite " +
+                  "skipped for partition : " + parMetaData.toString());
+              break;
+            }
+          } catch (HiveException e) {
+            LOG.info("Error while getting metadata : ", e);
+          }
+          validatePartSpec(table, partition, (ASTNode)tab, conf, false);
+        }
+        skipRecursion = false;
+        break;
+      case HiveParser.TOK_LATERAL_VIEW:
+      case HiveParser.TOK_LATERAL_VIEW_OUTER:
+        // todo: nested LV
+        assert ast.getChildCount() == 1;
+        qb.getParseInfo().getDestToLateralView().put(ctx_1.dest, ast);
+        break;
+      case HiveParser.TOK_CTE:
+        processCTE(qb, ast);
+        break;
+      default:
+        skipRecursion = false;
+        break;
+      }
+    }
+
+    if (!skipRecursion) {
+      // Iterate over the rest of the children
+      // 对于一个TOK中会出现多个统计子TOK的情况，如两个TOK_SUBQUERY,或者TOK_FROM和TOK_INSERT
+      int child_count = ast.getChildCount();
+      for (int child_pos = 0; child_pos < child_count && phase1Result; ++child_pos) {
+        // Recurse
+        // 当当前TOK解析正确时，则继续解析子TOK
+        phase1Result = phase1Result && doPhase1(
+            (ASTNode)ast.getChild(child_pos), qb, ctx_1, plannerCtx);
+      }
+    }
+    return phase1Result;
+  }
+```
