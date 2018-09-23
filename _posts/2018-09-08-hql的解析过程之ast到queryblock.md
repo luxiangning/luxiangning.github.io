@@ -2,7 +2,7 @@
 layout:     post
 title:      hive编译过程
 subtitle:   hive源码学习之-ast到queryblock
-date:       2018-09-08
+date:       2018-09-23
 author:     鲁湘宁
 header-img: img/doc1-bg-alone.jpg
 catalog: true
